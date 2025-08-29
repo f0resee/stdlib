@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// fork from https://github.com/Kidsunbo/kie_toolbox_go/blob/master/logs/logs.go
+
+var logger *Logger
+
+func init() {
+	logger = New()
+	logger.SetCallerDepth(3)
+}
+
 type RequestID struct{}
 
 type Level int8
@@ -22,12 +31,27 @@ const (
 	LevelFatal
 )
 
+var colorFormat = []string{
+	"\033[1;37m%s\033[0m",
+	"\033[1;36m%s\033[0m",
+	"\033[1;33m%s\033[0m",
+	"\033[1;35m%s\033[0m",
+	"\033[1;31m%s\033[0m",
+}
+
+func New() *Logger {
+	return &Logger{
+		logger:      log.New(os.Stdout, " ", 0),
+		level:       LevelInfo,
+		ctxFunc:     defaultContextFunction,
+		pathLength:  1,
+		callerDepth: 2,
+		msgPrefix:   "",
+	}
+}
+
 type Logger struct {
-	debugLogger *log.Logger
-	infoLogger  *log.Logger
-	warnLogger  *log.Logger
-	errorLogger *log.Logger
-	fatalLogger *log.Logger
+	logger      *log.Logger
 	level       Level
 	ctxFunc     func(ctx context.Context) string
 	pathLength  int8
@@ -41,21 +65,13 @@ func (l *Logger) SetLevel(level Level) {
 
 func (l *Logger) SetOutputFile(filename string) {
 	if filename == "" {
-		l.debugLogger.SetOutput(os.Stderr)
-		l.infoLogger.SetOutput(os.Stderr)
-		l.warnLogger.SetOutput(os.Stderr)
-		l.errorLogger.SetOutput(os.Stderr)
-		l.fatalLogger.SetOutput(os.Stderr)
+		l.logger.SetOutput(os.Stderr)
 	} else {
 		file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 		if err != nil {
 			log.Fatal(err)
 		}
-		l.debugLogger.SetOutput(file)
-		l.infoLogger.SetOutput(file)
-		l.warnLogger.SetOutput(file)
-		l.errorLogger.SetOutput(file)
-		l.fatalLogger.SetOutput(file)
+		l.logger.SetOutput(file)
 	}
 }
 
@@ -127,7 +143,8 @@ func (l *Logger) Debug(format string, values ...interface{}) {
 	if l.level > LevelDebug {
 		return
 	}
-	l.debugLogger.Println(stringify(l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelDebug], stringify("[DEBUG] ", l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) CtxDebug(ctx context.Context, format string, values ...interface{}) {
@@ -138,14 +155,16 @@ func (l *Logger) CtxDebug(ctx context.Context, format string, values ...interfac
 	if l.ctxFunc != nil {
 		ctxStr = l.ctxFunc(ctx)
 	}
-	l.debugLogger.Println(stringify(l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelDebug], stringify("[DEBUG] ", l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) Info(format string, values ...interface{}) {
 	if l.level > LevelInfo {
 		return
 	}
-	l.infoLogger.Println(stringify(l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelInfo], stringify("[INFO] ", l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) CtxInfo(ctx context.Context, format string, values ...interface{}) {
@@ -156,14 +175,16 @@ func (l *Logger) CtxInfo(ctx context.Context, format string, values ...interface
 	if l.ctxFunc != nil {
 		ctxStr = l.ctxFunc(ctx)
 	}
-	l.infoLogger.Println(stringify(l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelInfo], stringify("[INFO] ", l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) Warn(format string, values ...interface{}) {
 	if l.level > LevelWarn {
 		return
 	}
-	l.warnLogger.Println(stringify(l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelWarn], stringify("[WARN] ", l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) CtxWarn(ctx context.Context, format string, values ...interface{}) {
@@ -174,14 +195,16 @@ func (l *Logger) CtxWarn(ctx context.Context, format string, values ...interface
 	if l.ctxFunc != nil {
 		ctxStr = l.ctxFunc(ctx)
 	}
-	l.warnLogger.Println(stringify(l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelWarn], stringify("[WARN] ", l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) Error(format string, values ...interface{}) {
 	if l.level > LevelError {
 		return
 	}
-	l.errorLogger.Println(stringify(l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelError], stringify("[ERROR] ", l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) CtxError(ctx context.Context, format string, values ...interface{}) {
@@ -192,14 +215,16 @@ func (l *Logger) CtxError(ctx context.Context, format string, values ...interfac
 	if l.ctxFunc != nil {
 		ctxStr = l.ctxFunc(ctx)
 	}
-	l.errorLogger.Println(stringify(l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelError], stringify("[ERROR] ", l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 }
 
 func (l *Logger) Fatal(format string, values ...interface{}) {
 	if l.level > LevelFatal {
 		return
 	}
-	l.fatalLogger.Println(stringify(l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelFatal], stringify("[FATAL] ", l.getLogMetaInfo(), fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 	panic("panic happened because fatal is reported")
 }
 
@@ -211,15 +236,9 @@ func (l *Logger) CtxFatal(ctx context.Context, format string, values ...interfac
 	if l.ctxFunc != nil {
 		ctxStr = l.ctxFunc(ctx)
 	}
-	l.fatalLogger.Println(stringify(l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	rawLog := fmt.Sprintf(colorFormat[LevelFatal], stringify("[FATAL] ", l.getLogMetaInfo(), ctxStr, fmt.Sprintf(l.msgPrefix+format, values...)))
+	l.logger.Println(rawLog)
 	panic("panic happened because fatal is reported")
-}
-
-var logger *Logger
-
-func init() {
-	logger = New()
-	logger.SetCallerDepth(3)
 }
 
 func defaultContextFunction(ctx context.Context) string {
@@ -235,21 +254,6 @@ func defaultContextFunction(ctx context.Context) string {
 	}
 
 	return strings.Join(result, " ")
-}
-
-func New() *Logger {
-	return &Logger{
-		debugLogger: log.New(os.Stderr, "[DEBUG] ", 0),
-		infoLogger:  log.New(os.Stderr, "[INFO] ", 0),
-		warnLogger:  log.New(os.Stderr, "[WARN] ", 0),
-		errorLogger: log.New(os.Stderr, "[ERROR] ", 0),
-		fatalLogger: log.New(os.Stderr, "[FATAL] ", 0),
-		level:       LevelInfo,
-		ctxFunc:     defaultContextFunction,
-		pathLength:  1,
-		callerDepth: 2,
-		msgPrefix:   "",
-	}
 }
 
 func Default() *Logger {
