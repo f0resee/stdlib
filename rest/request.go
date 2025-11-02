@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
+	"time"
 
 	"golang.org/x/net/http2"
 )
@@ -17,8 +20,13 @@ type HTTPClient interface {
 }
 
 func NewRequest(c *RESTClient) *Request {
+	var timeout time.Duration
+	if c.Client != nil {
+		timeout = c.Client.Timeout
+	}
 	r := &Request{
-		c: c,
+		c:       c,
+		timeout: timeout,
 	}
 	return r
 }
@@ -26,17 +34,38 @@ func NewRequest(c *RESTClient) *Request {
 type Request struct {
 	c *RESTClient
 
+	timeout time.Duration
+
 	verb       string
 	pathPrefix string
+	subpath    string
 	params     url.Values
 	headers    http.Header
-	body       io.Reader
+
+	body      io.Reader
+	bodyBytes []byte
 
 	err error
 }
 
 func (r *Request) Verb(verb string) *Request {
 	r.verb = verb
+	return r
+}
+
+func (r *Request) Prefix(segments ...string) *Request {
+	if r.err != nil {
+		return r
+	}
+	r.pathPrefix = path.Join(r.pathPrefix, path.Join(segments...))
+	return r
+}
+
+func (r *Request) Suffix(segments ...string) *Request {
+	if r.err != nil {
+		return r
+	}
+	r.subpath = path.Join(r.subpath, path.Join(segments...))
 	return r
 }
 
@@ -47,6 +76,25 @@ func (r *Request) AbsPath(segments ...string) *Request {
 	r.pathPrefix = path.Join(r.c.base.Path, path.Join(segments...))
 	if len(segments) == 1 && (len(r.c.base.Path) > 1 || len(segments[0]) > 1 && strings.HasPrefix(segments[0], "/")) {
 		r.pathPrefix += "/"
+	}
+	return r
+}
+
+func (r *Request) RequestURI(uri string) *Request {
+	if r.err != nil {
+		return r
+	}
+	locator, err := url.Parse(uri)
+	if err != nil {
+		r.err = err
+		return r
+	}
+	r.AbsPath(locator.Path)
+	if len(locator.Query()) > 0 {
+		r.params = make(url.Values)
+		maps.Copy(r.params, locator.Query())
+	} else {
+		r.params = nil
 	}
 	return r
 }
@@ -77,6 +125,14 @@ func (r *Request) SetHeader(key string, values ...string) *Request {
 	return r
 }
 
+func (r *Request) Timeout(d time.Duration) *Request {
+	if r.err != nil {
+		return r
+	}
+	r.timeout = d
+	return r
+}
+
 func (r *Request) URL() *url.URL {
 	p := r.pathPrefix
 
@@ -92,8 +148,38 @@ func (r *Request) URL() *url.URL {
 			query.Add(key, value)
 		}
 	}
+
 	finalURL.RawQuery = query.Encode()
 	return finalURL
+}
+
+func (r *Request) Body(obj interface{}) *Request {
+	if r.err != nil {
+		return r
+	}
+	switch t := obj.(type) {
+	case string:
+		data, err := os.ReadFile(t)
+		if err != nil {
+			r.err = err
+			return r
+		}
+		r.body = nil
+		r.bodyBytes = data
+	case []byte:
+		r.body = nil
+		r.bodyBytes = t
+	case io.Reader:
+		r.body = t
+		r.bodyBytes = nil
+	default:
+		r.err = fmt.Errorf("unknown type used for body: %+v", obj)
+	}
+	return r
+}
+
+func (r *Request) Error() error {
+	return r.err
 }
 
 func (r *Request) newHTTPRequest(ctx context.Context) (*http.Request, error) {
@@ -110,6 +196,12 @@ func (r *Request) request(ctx context.Context, fn func(*http.Request, *http.Resp
 	client := r.c.Client
 	if client == nil {
 		client = http.DefaultClient
+	}
+
+	if r.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.timeout)
+		defer cancel()
 	}
 
 	req, err := r.newHTTPRequest(ctx)
@@ -139,7 +231,7 @@ type Result struct {
 	statusCode  int
 }
 
-func (r *Request) transformResponse(ctx context.Context, resp *http.Response, req *http.Request) Result {
+func (r *Request) transformResponse(_ context.Context, resp *http.Response, _ *http.Request) Result {
 	var body []byte
 	if resp.Body != nil {
 		data, err := io.ReadAll(resp.Body)
@@ -147,12 +239,12 @@ func (r *Request) transformResponse(ctx context.Context, resp *http.Response, re
 		case nil:
 			body = data
 		case http2.StreamError:
-			streamErr := fmt.Errorf("Original error: %w", err)
+			streamErr := fmt.Errorf("original error: %w", err)
 			return Result{
 				err: streamErr,
 			}
 		default:
-			unexpectedErr := fmt.Errorf("Original error: %w", err)
+			unexpectedErr := fmt.Errorf("original error: %w", err)
 			return Result{
 				err: unexpectedErr,
 			}

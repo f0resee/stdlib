@@ -40,7 +40,9 @@ func Test_RESTClient(t *testing.T) {
 		t.Fatalf("new rest client error: %s", err.Error())
 	}
 
-	ctx, _ := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
 	result := restClient.Get().AbsPath("/test/get").Do(ctx)
 	if result.err != nil {
 		t.Fatalf("do error: %s", result.err.Error())
